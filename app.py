@@ -115,3 +115,6 @@ pipeline = InferencePipeline.init_with_workflow(
 )
 pipeline.start()
 pipeline.join()
+
+if __name__ == "__main__":
+    main()

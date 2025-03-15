@@ -1,5 +1,8 @@
+certifi
 opencv-python
 numpy
 pandas
 ultralytics
 cvzone
+inference
+torch
