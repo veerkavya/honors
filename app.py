@@ -1,18 +1,16 @@
-
 from inference import InferencePipeline
 import cv2
-import urllib3
-import torch
 import sqlite3
 import time
 import re
 import numpy as np
 import string
 from datetime import datetime
-from ultralytics import YOLO
-import tkinter as tk
-from tkinter import ttk
-from PIL import Image, ImageTk
+from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, 
+                            QPushButton, QVBoxLayout, QComboBox, QMessageBox)
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap, QImage
+import sys
 
 def assign_parking(vehicle_no):
     """
@@ -58,62 +56,85 @@ def assign_parking(vehicle_no):
     now = datetime.now()
     login_time = now.strftime("%H:%M:%S")
     date_str = now.strftime("%Y-%m-%d")
-    #   NEEDS TO PASS THIS LOGIN TIME, SLOT_ID, USER_ID TO SLOT.PY AND THEN DO THE FOLLOWING OCCUPIED DB COMMAND.(have to think how to pass)
-    # cursor.execute("INSERT INTO Occupied (login_time, logout_time, date, slot_id, user_id) VALUES (?, NULL, ?, ?, ?)",
-    #                (login_time, date_str, slot_id, user_id))
-    # conn.commit()
-    # conn.close()
+    conn.commit()
+    conn.close()
     return slot_no, slot_type, user_id
 
 
-def registration_window(detected_plate):# NEEDS TO KEEP SOME THER PORTAL FOR THIS
+class RegistrationWindow(QWidget):
     """
-    Creates a Tkinter window that shows the current frame and asks the user to register.
+    PyQt5 window that shows the current frame and asks the user to register.
     The detected_plate is auto-filled. User is asked for Name and User Type.
+    """
+    def __init__(self, detected_plate, parent=None):
+        super().__init__(parent)
+        self.detected_plate = detected_plate
+        self.result = {}
+        self.initUI()
+        
+    def initUI(self):
+        self.setWindowTitle('Registration Required')
+        self.setMinimumSize(300, 200)
+        
+        layout = QVBoxLayout()
+        
+        # License plate display
+        plate_label = QLabel('Detected License Plate:')
+        self.plate_display = QLineEdit(self.detected_plate)
+        self.plate_display.setReadOnly(True)
+        
+        # Name input
+        name_label = QLabel('Name:')
+        self.name_input = QLineEdit()
+        
+        # User type selection
+        type_label = QLabel('User Type:')
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(['Faculty', 'Guest'])
+        
+        # Submit button
+        self.submit_btn = QPushButton('Register')
+        self.submit_btn.clicked.connect(self.submit)
+        
+        # Add all widgets to layout
+        layout.addWidget(plate_label)
+        layout.addWidget(self.plate_display)
+        layout.addWidget(name_label)
+        layout.addWidget(self.name_input)
+        layout.addWidget(type_label)
+        layout.addWidget(self.type_combo)
+        layout.addWidget(self.submit_btn)
+        
+        self.setLayout(layout)
+        
+    def submit(self):
+        if not self.name_input.text():
+            QMessageBox.warning(self, "Input Error", "Please enter your name")
+            return
+            
+        self.result['name'] = self.name_input.text()
+        self.result['user_type'] = self.type_combo.currentText()
+        self.result['vehicle_no'] = self.detected_plate
+        self.close()
+
+
+def registration_window(detected_plate):
+    """
+    Creates a PyQt5 window that asks the user to register.
     Returns (name, user_type, vehicle_no) once registration is complete.
     """
-    from PIL import Image, ImageTk
-    # frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # pil_image = Image.fromarray(frame_rgb)
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+    
+    reg_window = RegistrationWindow(detected_plate)
+    reg_window.show()
+    app.exec_()
+    
+    return reg_window.result.get('name'), reg_window.result.get('user_type'), reg_window.result.get('vehicle_no')
 
-    reg_data = {}
-    def submit():
-        reg_data['name'] = name_var.get()
-        reg_data['user_type'] = type_var.get()
-        reg_data['vehicle_no'] = detected_plate
-        root.destroy()
 
-    root = tk.Tk()
-    root.title("Registration Required")
-
-    #imgtk = ImageTk.PhotoImage(image=pil_image)
-    #img_label = tk.Label(root, image=imgtk)
-    #img_label.pack()
-
-    tk.Label(root, text="Detected License Plate:").pack()
-    plate_entry = tk.Entry(root, width=20)
-    plate_entry.insert(0, detected_plate)
-    plate_entry.config(state="readonly")
-    plate_entry.pack()
-
-    tk.Label(root, text="Name:").pack()
-    name_var = tk.StringVar()
-    name_entry = tk.Entry(root, textvariable=name_var, width=20)
-    name_entry.pack()
-
-    tk.Label(root, text="User Type:").pack()
-    type_var = tk.StringVar()
-    type_dropdown = ttk.Combobox(root, textvariable=type_var, values=["Faculty", "Guest"], state="readonly", width=17)
-    type_dropdown.current(0)
-    type_dropdown.pack()
-
-    submit_button = tk.Button(root, text="Register", command=submit)
-    submit_button.pack()
-
-    root.mainloop()
-    return reg_data.get('name'), reg_data.get('user_type'), reg_data.get('vehicle_no')
-
-def register_user(name, user_type, vehicle_no):# NEEDS TO KEEP SOME THER PORTAL FOR THIS
+def register_user(name, user_type, vehicle_no):
     """
     Inserts a new user into the Users table.
     """
@@ -127,44 +148,63 @@ def register_user(name, user_type, vehicle_no):# NEEDS TO KEEP SOME THER PORTAL 
     print(f"User registered: {name}, {vehicle_no}, {user_type}")
 
 
+def show_parking_notification(slot_no, slot_type):
+    """Display a notification about parking availability using PyQt5"""
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+    
+    msg = QMessageBox()
+    msg.setWindowTitle("Parking Information")
+    
+    if slot_no is None:
+        msg.setText("No parking slots available")
+        msg.setIcon(QMessageBox.Warning)
+    else:
+        msg.setText(f"You can park at slot {slot_no} ({slot_type} area)")
+        msg.setIcon(QMessageBox.Information)
+    
+    msg.exec_()
+
 
 def custom_sink(result, video_frame):
     # Handle VideoFrame object from inference library
-    visualization=result["line_counter_visualization"]
-    if result.get("google_gemini"):
-        print(result["google_gemini"])
+    visualization = result["line_counter_visualization"]
     cv2.imshow("Video Feed", visualization.numpy_image)
     cv2.waitKey(1)
-    detected_plate = result["google_gemini"][0].split('\n')[0] #place the detected number plate
-    if detected_plate:
-        conn = sqlite3.connect('parking.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM Users WHERE vehicle_no = ?", (detected_plate,))
-        user = cursor.fetchone()
-        conn.close()
-
-
-        if user is None:
-            print("User not registered. Launching registration window.")
-            # cv2.imshow("Registration - Verify Placement", annotated_frame)
-            # cv2.waitKey(500)
-            name, reg_type, vehicle_no = registration_window(detected_plate)
-            if name and reg_type and vehicle_no:
-                register_user(name, reg_type, vehicle_no)#REGISTER KARNA HE HOGA
-                #AFTER REGISTERING GET ITS USER_ID
-        slot_no, slot_type, user_id = assign_parking(detected_plate)
-        #NOTIFICATION TO THE USER THAT THIS SLOT IS EMPTY
-
+    
+    if result.get("google_gemini"):
+        print(result["google_gemini"])
+        detected_plate = result["google_gemini"][0].split('\n')[0]  # place the detected number plate
+        if detected_plate:
+            conn = sqlite3.connect('parking.db')
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM Users WHERE vehicle_no = ?", (detected_plate,))
+            user = cursor.fetchone()
+            conn.close()
+            
+            if user is None:
+                print("User not registered. Launching registration window.")
+                name, reg_type, vehicle_no = registration_window(detected_plate)
+                if name and reg_type and vehicle_no:
+                    register_user(name, reg_type, vehicle_no)
+            
+            slot_no, slot_type, user_id = assign_parking(detected_plate)
+            show_parking_notification(slot_no, slot_type)
 
 
 # Initialize pipeline
-pipeline = InferencePipeline.init_with_workflow(
-    api_key="7RdO6RJ5gzrJPPIWh4Gm",
-    workspace_name="darpan-neve-gigwd",
-    workflow_id="custom-workflow-2",
-    video_reference="./test.mp4",
-    max_fps=10,
-    on_prediction=custom_sink
-)
-pipeline.start()
-pipeline.join()
+def main():
+    pipeline = InferencePipeline.init_with_workflow(
+        api_key="7RdO6RJ5gzrJPPIWh4Gm",
+        workspace_name="darpan-neve-gigwd",
+        workflow_id="custom-workflow-2-2",
+        video_reference="./test.mp4",
+        max_fps=10,
+        on_prediction=custom_sink
+    )
+    pipeline.start()
+    pipeline.join()
+
+if __name__ == "__main__":
+    main()
