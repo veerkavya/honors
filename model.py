@@ -1,45 +1,14 @@
-import cv2
-import urllib3
-import torch
 import sqlite3
-import time
-import re
-import numpy as np
-import string
-from datetime import datetime
-from ultralytics import YOLO
-import tkinter as tk
-from tkinter import ttk
-from PIL import Image, ImageTk
+import csv
+import os
 
 def setup_database():
     """
-    Creates and initializes the SQLite database with the following tables:
-
-    UserType:
-      - type_id (PK)
-      - type_name (Faculty/Guest)
-
-    Users:
-      - user_id (PK)
-      - name
-      - vehicle_no (unique license plate)
-      - type_id (FK to UserType)
-
-    Slots:
-      - slot_id (PK)
-      - slot_no
-      - slot_type (faculty/guest)
-      - status ("empty", "waiting", "occupied")
-      - car_license_plate (to store assigned vehicle number)
-
-    Occupied (ParkingHistory):
-      - record_id (PK)
-      - login_time
-      - logout_time
-      - date
-      - slot_id (FK to Slots)
-      - user_id (FK to Users)
+    Creates and initializes the SQLite database, including:
+    - UserType
+    - Users (populated from CSV)
+    - Slots
+    - Occupied (Parking History)
     """
     conn = sqlite3.connect('parking.db')
     cursor = conn.cursor()
@@ -48,14 +17,13 @@ def setup_database():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS UserType (
             type_id INTEGER PRIMARY KEY,
-            type_name TEXT
+            type_name TEXT UNIQUE
         )
     """)
-    cursor.execute("SELECT COUNT(*) FROM UserType")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO UserType (type_id, type_name) VALUES (1, 'Faculty')")
-        cursor.execute("INSERT INTO UserType (type_id, type_name) VALUES (2, 'Guest')")
-        conn.commit()
+
+    # Insert UserTypes (if not exists)
+    cursor.execute("INSERT OR IGNORE INTO UserType (type_id, type_name) VALUES (1, 'Faculty')")
+    cursor.execute("INSERT OR IGNORE INTO UserType (type_id, type_name) VALUES (2, 'Guest')")
 
     # Create Users table
     cursor.execute("""
@@ -68,7 +36,20 @@ def setup_database():
         )
     """)
 
-    # Create Slots table with car_license_plate column added
+    # Populate Users table from CSV
+    csv_file = "users.csv"
+    if os.path.exists(csv_file):
+        with open(csv_file, "r") as file:
+            reader = csv.reader(file)
+            next(reader)  # Skip header row
+            for row in reader:
+                name, vehicle_no, type_name = row
+                cursor.execute("""
+                    INSERT OR IGNORE INTO Users (name, vehicle_no, type_id)
+                    VALUES (?, ?, (SELECT type_id FROM UserType WHERE type_id = ?))
+                """, (name, vehicle_no, type_name))
+
+    # Create Slots table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS Slots (
             slot_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,19 +59,19 @@ def setup_database():
             car_license_plate TEXT
         )
     """)
+
+    # Insert default slots if table is empty
     cursor.execute("SELECT COUNT(*) FROM Slots")
     if cursor.fetchone()[0] == 0:
         slot_no = 1
-        # Assume 4 faculty slots and 6 guest slots
-        for _ in range(4):
+        for _ in range(4):  # 4 Faculty slots
             cursor.execute("INSERT INTO Slots (slot_no, slot_type, status) VALUES (?, 'faculty', 'empty')", (slot_no,))
             slot_no += 1
-        for _ in range(6):
+        for _ in range(6):  # 6 Guest slots
             cursor.execute("INSERT INTO Slots (slot_no, slot_type, status) VALUES (?, 'guest', 'empty')", (slot_no,))
             slot_no += 1
-        conn.commit()
 
-    # Create Occupied (ParkingHistory) table
+    # Create Occupied table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS Occupied (
             record_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,11 +84,13 @@ def setup_database():
             FOREIGN KEY(user_id) REFERENCES Users(user_id)
         )
     """)
+
     conn.commit()
     conn.close()
 
 def main():
     setup_database()
+    print("Database setup completed. Users loaded from CSV.")
 
 if __name__ == "__main__":
     main()

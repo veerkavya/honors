@@ -10,7 +10,7 @@ from datetime import datetime
 
 # API Endpoint for user ID management
 USER_ID_API = "http://localhost:5001"
-
+DEQUEUE_API_URL = "http://localhost:5001/dequeue_user_data"
 # Load slot data
 with open("slot_data.pkl", "rb") as f:
     data = pickle.load(f)
@@ -37,14 +37,28 @@ def fetch_user_ids():
         return {"incoming": None, "outgoing": None}
 
 def reset_user_id(user_type):
-    """Resets the incoming or outgoing user ID to None."""
-    payload = {user_type: None}
     try:
-        response = requests.post(f"{USER_ID_API}/update_user_ids", json=payload)
+        if user_type == 'incoming':
+            payload = {
+                "incoming": True,
+                "login_time": True,
+                "vehicle_no": True
+            }
+        else:
+            payload = {
+                "outgoing": True,
+            }
+
+        response = requests.post(DEQUEUE_API_URL, json=payload)
         if response.status_code == 200:
-            print(f"{user_type} user ID reset successfully")
-    except requests.exceptions.RequestException as e:
-        print(f"Error resetting {user_type} user ID: {e}")
+            data = response.json()
+            print(f"✅ Dequeued Data: {data['removed_data']}")
+            print(f"📌 Remaining Queue: {data['remaining_data']}")
+            return data["removed_data"]
+        else:
+            print(f"❌ Failed to dequeue user data: {response.text}")
+    except Exception as e:
+        print(f"⚠️ Error calling dequeue API: {e}")
 
 def detect_vehicles(frame):
     """Runs YOLO on the frame and returns list of centers of detected vehicles."""
@@ -125,9 +139,9 @@ while True:
                             cvzone.putTextRect(frame, f'timing: {time_difference}', (50, 180), 2, 2)
 
                             cursor.execute("INSERT INTO Occupied (login_time, logout_time, date, slot_id, user_id) VALUES (?, NULL, ?, ?, ?)",
-                                        (login_time, date_str, idx+1, user_id_incoming))
+                                        (login_time, date_str, idx+1, user_id_incoming))    #payload
                             cursor.execute("UPDATE Slots SET status = 'occupied', car_license_plate = ? WHERE slot_id = ?",
-                                        ('MH' + str(i), idx+1))
+                                        ('MH' + str(i), idx+1)) # we need to get data from user_id.py
                             conn.commit()
 
                             reset_user_id("incoming")  # Reset incoming user ID
